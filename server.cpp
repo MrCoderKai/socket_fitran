@@ -11,9 +11,9 @@
 #include <mutex>
 #include "common.h"
 
-constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
-constexpr int MAX_CLIENT_NUM = 20;
-constexpr int SERVER_PORT = 24640;
+//constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
+//constexpr int MAX_CLIENT_NUM = 20;
+//constexpr int SERVER_PORT = 24645;
 int g_ClientSocketFd[MAX_CLIENT_NUM];
 bool g_ClientSocketAliveStatus[MAX_CLIENT_NUM];
 struct sockaddr_in g_ClentAddrArray[MAX_CLIENT_NUM];
@@ -24,7 +24,7 @@ std::thread* g_ptRecvThread[MAX_CLIENT_NUM];
 
 std::mutex g_mutex;
 
-std::string SERVER_IP_ADDRESS = "39.107.75.198";
+//std::string SERVER_IP_ADDRESS = "39.107.75.198";
 int g_Socket;
 int g_AcceptSocket;
 struct sockaddr_in g_ServerSockAddr;
@@ -83,19 +83,25 @@ bool notifyAcceptTheadExit()
         memset(&serv_addr, 0, sizeof (struct sockaddr));
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(SERVER_PORT);
-        serv_addr.sin_addr.s_addr = inet_addr(SERVER_IP_ADDRESS.c_str());
+        // serv_addr.sin_addr.s_addr = inet_addr(SERVER_IP_ADDRESS.c_str());
+        serv_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
         
         // send connect request to server.
         std::cout << "notifyAcceptTheadExit: Begin to connect to localhost ..." << std::endl;
         if (connect(conn_fd, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
+        // if (connect(g_Socket, (struct sockaddr *)&serv_addr, sizeof(struct sockaddr)) < 0)
         {
            std::cout << "notifyAcceptTheadExit: Connect Failed." << std::endl;
+           close(conn_fd);
+           usleep(200000);
+           continue;
         }
         else
         {
            std::cout << "notifyAcceptTheadExit: Connect Sucess." << std::endl;
         }
-        usleep(200);
+        close(conn_fd);
+        usleep(200000);
     }
     std::cout << "notifyAcceptTheadExit Thead Exit." << std::endl;
 }
@@ -120,11 +126,15 @@ void sendThread(int index)
 {
     usleep(20000);
     std::cout << "Hello, This is send thread, index = " << index << std::endl;
+    char t_cBuffer[200]; // = {"Hello. this is server."};
+    std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(index);
+    strcpy(t_cBuffer, buf.c_str());
+    send(g_ClientSocketFd[index], t_cBuffer, buf.size(), 0);
     usleep(200000);
     g_mutex.lock();
     g_bSendThreadIdleFlag[index] = true;
+    std::cout << "Send Thread Exits. index = " << index << std::endl;
     g_mutex.unlock();
-    std::cout << "Receive Thread Exits. index = " << index << std::endl;
 }
 
 
@@ -135,8 +145,8 @@ void recvThread(int index)
     usleep(200000);
     g_mutex.lock();
     g_bRecvThreadIdleFlag[index] = true;
-    g_mutex.unlock();
     std::cout << "Receive Thread Exits. index = " << index << std::endl;
+    g_mutex.unlock();
 }
 
 
@@ -206,16 +216,25 @@ void acceptThread()
         g_mutex.unlock();
     }
     bool allSocketClosedFlag = false;
-    while(allSocketClosedFlag)
+    while(!allSocketClosedFlag)
     {
-        int i;
+        g_mutex.lock();
+        std::cout << "acceptThread: Checking whether all send & recv thread exits." << std::endl;
+        int i = 0;
         for(; i < MAX_CLIENT_NUM; ++i)
         {
             if(g_ClientSocketAliveStatus[i])
+            {
+                std::cout << "acceptThread: index = " << i << " is still running." << std::endl;
                 break;
+            }
         }
         if(i == MAX_CLIENT_NUM)
             allSocketClosedFlag = true;
+        std::cout << "acceptThread: i = " << i << "\t allSocketClosedFlag = " << allSocketClosedFlag << std::endl;
+        g_mutex.unlock();
+        std::cout << "acceptThread: Check finished." << std::endl;
+        usleep(20000);
     }
     g_acceptThreadExitFlag = true;
     std::cout << "Accept Thread Exits." << std::endl;
@@ -237,7 +256,7 @@ int main(int argc, char** argv)
     // g_ServerSockAddr.sin_addr.s_addr = inet_addr(SERVER_IP_ADDRESS.c_str());
     g_ServerSockAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     g_ServerSockAddr.sin_port = htons(SERVER_PORT);
-    std::cout << "Hello, this is socket programming demo." << std::endl;
+    std::cout << "Hello, this is Server socket programming demo." << std::endl;
     if (bind(g_Socket, (struct sockaddr *)&g_ServerSockAddr, sizeof(struct sockaddr)) < 0)
     {
         std::cout << "Bind Failed." << std::endl;

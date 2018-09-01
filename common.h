@@ -1,7 +1,13 @@
 #ifndef _SOCKET_COMMUNICATION_H_
 #define _SOCKET_COMMUNICATION_H_
-
+#include <iostream>
 // extern  constexpr int MAX_SOCKET_PACKAGE_LEN;
+
+constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
+constexpr int SERVER_PORT = 24647;
+constexpr int MAX_CLIENT_NUM = 20;
+// std::string SERVER_IP_ADDRESS = "39.107.75.198";
+std::string SERVER_IP_ADDRESS = "127.0.0.1";
 
 typedef unsigned char UCHAR;
 
