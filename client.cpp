@@ -16,7 +16,7 @@
 //constexpr int SERVER_PORT = 24644;
 
 std::mutex g_mutex;
-
+const std::string SERVER_IP_ADDRESS = "127.0.0.1";
 // std::string SERVER_IP_ADDRESS = "39.107.75.198";
 //std::string SERVER_IP_ADDRESS = "127.0.0.1";
 int g_Socket;
@@ -48,6 +48,7 @@ void recvThread()
     std::cout << "Before receive, cnt = " << cnt << std::endl;
     cnt = (int)recv(g_Socket, t_recvBuf, 1024, 0 );
     std::cout << "After receive, cnt = " << cnt << std::endl;
+    recvFile(g_Socket);
     usleep(20);
     std::cout << t_recvBuf << std::endl;
     usleep(2000000);

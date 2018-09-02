@@ -11,9 +11,13 @@
 #include <mutex>
 #include "common.h"
 
-//constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
-//constexpr int MAX_CLIENT_NUM = 20;
-//constexpr int SERVER_PORT = 24645;
+//const static int MAX_SOCKET_PACKAGE_LEN = 1024;
+//const static int MAX_CLIENT_NUM = 20;
+//const static int SERVER_PORT = 24645;
+//std::string SERVER_IP_ADDRESS = "39.107.75.198";
+const std::string SERVER_IP_ADDRESS = "127.0.0.1";
+
+
 int g_ClientSocketFd[MAX_CLIENT_NUM];
 bool g_ClientSocketAliveStatus[MAX_CLIENT_NUM];
 struct sockaddr_in g_ClentAddrArray[MAX_CLIENT_NUM];
@@ -22,9 +26,12 @@ std::thread* g_ptSendThread[MAX_CLIENT_NUM];
 bool g_bRecvThreadIdleFlag[MAX_CLIENT_NUM];
 std::thread* g_ptRecvThread[MAX_CLIENT_NUM];
 
+UCHAR* g_ucRecvBuffer[MAX_CLIENT_NUM];
+int g_iReadOffset[g_ucRecvBuffer];
+int g_iWriteOffset[g_ucRecvBuffer];
+
 std::mutex g_mutex;
 
-//std::string SERVER_IP_ADDRESS = "39.107.75.198";
 int g_Socket;
 int g_AcceptSocket;
 struct sockaddr_in g_ServerSockAddr;
@@ -37,11 +44,14 @@ void initial()
     memset(&g_ClientSocketAliveStatus, 0, sizeof(g_ClientSocketAliveStatus));
     memset(&g_ptSendThread, 0, sizeof(g_ptSendThread));
     memset(&g_ptRecvThread, 0, sizeof(g_ptRecvThread));
+    memset(&g_iReadOffset, 0, sizeof(g_iReadOffset));
+    memset(&g_iWriteOffset, 0, sizeof(g_iWriteOffset));
     for(int i=0; i < MAX_CLIENT_NUM; ++i)
     {
         g_ClientSocketFd[i] = -1;
         g_bSendThreadIdleFlag[i] = true;
         g_bRecvThreadIdleFlag[i] = true;
+        g_ucRecvBuffer[i] = nullptr;
     }
 }
 
@@ -130,6 +140,7 @@ void sendThread(int index)
     std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(index);
     strcpy(t_cBuffer, buf.c_str());
     send(g_ClientSocketFd[index], t_cBuffer, buf.size(), 0);
+    sendFile(g_ClientSocketFd[index], "data.txt", 0);
     usleep(200000);
     g_mutex.lock();
     g_bSendThreadIdleFlag[index] = true;
@@ -142,9 +153,14 @@ void recvThread(int index)
 {
     usleep(20000);
     std::cout << "Hello, This is receive thread, index = " << index << std::endl;
+    g_iReadOffset[index] = 0;
+    g_iWriteOffset[index] = 0;
+
     usleep(200000);
     g_mutex.lock();
     g_bRecvThreadIdleFlag[index] = true;
+    g_iReadOffset[index] = 0;
+    g_iWriteOffset[index] = 0;
     std::cout << "Receive Thread Exits. index = " << index << std::endl;
     g_mutex.unlock();
 }
