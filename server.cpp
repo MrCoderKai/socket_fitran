@@ -10,6 +10,7 @@
 #include <thread>
 #include <mutex>
 #include "common.h"
+#include <ctime>
 
 //const static int MAX_SOCKET_PACKAGE_LEN = 1024;
 //const static int MAX_CLIENT_NUM = 20;
@@ -17,18 +18,18 @@
 //std::string SERVER_IP_ADDRESS = "39.107.75.198";
 const std::string SERVER_IP_ADDRESS = "127.0.0.1";
 
-
-int g_ClientSocketFd[MAX_CLIENT_NUM];
 bool g_ClientSocketAliveStatus[MAX_CLIENT_NUM];
-struct sockaddr_in g_ClentAddrArray[MAX_CLIENT_NUM];
-bool g_bSendThreadIdleFlag[MAX_CLIENT_NUM];
-std::thread* g_ptSendThread[MAX_CLIENT_NUM];
-bool g_bRecvThreadIdleFlag[MAX_CLIENT_NUM];
-std::thread* g_ptRecvThread[MAX_CLIENT_NUM];
 
-UCHAR* g_ucRecvBuffer[MAX_CLIENT_NUM];
-int g_iReadOffset[g_ucRecvBuffer];
-int g_iWriteOffset[g_ucRecvBuffer];
+struct STRU_SERVER_CONTROL g_struServerControl[MAX_CLIENT_NUM];
+// int g_ClientSocketFd[MAX_CLIENT_NUM];
+// struct sockaddr_in g_ClentAddrArray[MAX_CLIENT_NUM];
+// bool g_bSendThreadIdleFlag[MAX_CLIENT_NUM];
+// std::thread* g_ptSendThread[MAX_CLIENT_NUM];
+// bool g_bRecvThreadIdleFlag[MAX_CLIENT_NUM];
+// std::thread* g_ptRecvThread[MAX_CLIENT_NUM];
+// UCHAR* g_ucRecvBuffer[MAX_CLIENT_NUM];
+// int g_iReadOffset[g_ucRecvBuffer];
+// int g_iWriteOffset[g_ucRecvBuffer];
 
 std::mutex g_mutex;
 
@@ -38,20 +39,37 @@ struct sockaddr_in g_ServerSockAddr;
 bool g_ExitFlag = false;
 bool g_acceptThreadExitFlag = false;
 
+//void initial()
+//{
+//    memset(&g_ClentAddrArray, 0, sizeof(g_ClentAddrArray));
+//    memset(&g_ClientSocketAliveStatus, 0, sizeof(g_ClientSocketAliveStatus));
+//    memset(&g_ptSendThread, 0, sizeof(g_ptSendThread));
+//    memset(&g_ptRecvThread, 0, sizeof(g_ptRecvThread));
+//    memset(&g_iReadOffset, 0, sizeof(g_iReadOffset));
+//    memset(&g_iWriteOffset, 0, sizeof(g_iWriteOffset));
+//    for(int i=0; i < MAX_CLIENT_NUM; ++i)
+//    {
+//        g_ClientSocketFd[i] = -1;
+//        g_bSendThreadIdleFlag[i] = true;
+//        g_bRecvThreadIdleFlag[i] = true;
+//        g_ucRecvBuffer[i] = nullptr;
+//    }
+//}
+
 void initial()
 {
-    memset(&g_ClentAddrArray, 0, sizeof(g_ClentAddrArray));
     memset(&g_ClientSocketAliveStatus, 0, sizeof(g_ClientSocketAliveStatus));
-    memset(&g_ptSendThread, 0, sizeof(g_ptSendThread));
-    memset(&g_ptRecvThread, 0, sizeof(g_ptRecvThread));
-    memset(&g_iReadOffset, 0, sizeof(g_iReadOffset));
-    memset(&g_iWriteOffset, 0, sizeof(g_iWriteOffset));
     for(int i=0; i < MAX_CLIENT_NUM; ++i)
     {
-        g_ClientSocketFd[i] = -1;
-        g_bSendThreadIdleFlag[i] = true;
-        g_bRecvThreadIdleFlag[i] = true;
-        g_ucRecvBuffer[i] = nullptr;
+        g_struServerControl[i].m_ClientSocketFd = -1;
+        g_struServerControl[i].m_bSendThreadIdleFlag = true;
+        g_struServerControl[i].m_ptSendThread = nullptr;
+        g_struServerControl[i].m_bRecvThreadIdleFlag = true;
+        g_struServerControl[i].m_ptRecvThread = nullptr;
+        g_struServerControl[i].m_iReadOffset = 0;
+        g_struServerControl[i].m_iWriteOffset = 0;
+        memset(&g_struServerControl[i].m_ClientAddr, 0, sizeof(g_struServerControl[i].m_ClientAddr));
+        memset(&g_struServerControl[i].m_ucReceiveBuffer, 0, sizeof(g_struServerControl[i].m_ucReceiveBuffer));
     }
 }
 
@@ -135,15 +153,31 @@ bool isStop()
 void sendThread(int index)
 {
     usleep(20000);
+    srand((unsigned)time(NULL));
     std::cout << "Hello, This is send thread, index = " << index << std::endl;
     char t_cBuffer[200]; // = {"Hello. this is server."};
-    std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(index);
-    strcpy(t_cBuffer, buf.c_str());
-    send(g_ClientSocketFd[index], t_cBuffer, buf.size(), 0);
-    sendFile(g_ClientSocketFd[index], "data.txt", 0);
+    int t_ClientId = rand();
+    //std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(t_ClientId);
+    //strcpy(t_cBuffer, buf.c_str());
+    //send(g_struServerControl[index].m_ClientSocketFd, t_cBuffer, buf.size(), 0);
+
+    // Send Client ID
+    struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID t_struAssignId;
+    t_struAssignId.m_struHeader.m_ucMsgType = SERVER_CLIENT_ASSIGN_ID;
+    t_struAssignId.m_iId = t_ClientId;
+    std::cout << "SendThread: client id = " << t_ClientId << std::endl;
+    send(g_struServerControl[index].m_ClientSocketFd, &t_struAssignId, sizeof(t_struAssignId), 0);
+
+    // Begin to send file
+    sendFile(g_struServerControl[index].m_ClientSocketFd, "screen_shoot_20180902231104.png", 0);
+    
+    // Send close signal
+    struct STRU_CLOSE_SIGNAL t_struCloseSignal;
+    t_struCloseSignal.m_struHeader.m_ucMsgType = SERVER_CLIENT_CLOSE_SIGNAL;
+    send(g_struServerControl[index].m_ClientSocketFd, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
     usleep(200000);
     g_mutex.lock();
-    g_bSendThreadIdleFlag[index] = true;
+    g_struServerControl[index].m_bSendThreadIdleFlag = true;
     std::cout << "Send Thread Exits. index = " << index << std::endl;
     g_mutex.unlock();
 }
@@ -153,14 +187,13 @@ void recvThread(int index)
 {
     usleep(20000);
     std::cout << "Hello, This is receive thread, index = " << index << std::endl;
-    g_iReadOffset[index] = 0;
-    g_iWriteOffset[index] = 0;
-
+    g_struServerControl[index].m_iReadOffset = 0;
+    g_struServerControl[index].m_iWriteOffset = 0;
+    memset(&g_struServerControl[index].m_ucReceiveBuffer, 0, sizeof(g_struServerControl[index].m_ucReceiveBuffer));
+    
     usleep(200000);
     g_mutex.lock();
-    g_bRecvThreadIdleFlag[index] = true;
-    g_iReadOffset[index] = 0;
-    g_iWriteOffset[index] = 0;
+    g_struServerControl[index].m_bRecvThreadIdleFlag = true;
     std::cout << "Receive Thread Exits. index = " << index << std::endl;
     g_mutex.unlock();
 }
@@ -176,14 +209,14 @@ void updateSystemStatus()
         g_mutex.lock();
         for(int i=0; i < MAX_CLIENT_NUM; ++i)
         {
-            if(g_bSendThreadIdleFlag[i] && g_bRecvThreadIdleFlag[i] && g_ClientSocketFd[i] != -1)
+            if(g_struServerControl[i].m_bSendThreadIdleFlag && g_struServerControl[i].m_bRecvThreadIdleFlag && g_struServerControl[i].m_ClientSocketFd != -1)
             {
-                close(g_ClientSocketFd[i]);
-                g_ClientSocketFd[i] = -1;
+                close(g_struServerControl[i].m_ClientSocketFd);
+                g_struServerControl[i].m_ClientSocketFd = -1;
                 g_ClientSocketAliveStatus[i] = false;
-                memset(&g_ClentAddrArray[i], 0, sizeof(struct sockaddr_in));
-                g_ptSendThread[i] = nullptr;
-                g_ptRecvThread[i] = nullptr;
+                memset(&g_struServerControl[i].m_ClientAddr, 0, sizeof(g_struServerControl[i].m_ClientAddr));
+                g_struServerControl[i].m_ptSendThread = nullptr;
+                g_struServerControl[i].m_ptRecvThread = nullptr;
             }
         }
         g_mutex.unlock();
@@ -198,7 +231,7 @@ void acceptThread()
     usleep(20000);
     std::cout << "Hello, this is acceptThread." << std::endl;
     struct sockaddr_in t_ClientAddr;
-    socklen_t t_ClientLen = sizeof(struct sockaddr_in);
+    socklen_t t_ClientLen = sizeof(t_ClientAddr);
     while(!g_ExitFlag)
     {
         int t_SocketIdleIndex = findIdleSocketIdx();
@@ -219,16 +252,16 @@ void acceptThread()
         }
         g_mutex.lock();
         g_ClientSocketAliveStatus[t_SocketIdleIndex] = true;
-        g_ClientSocketFd[t_SocketIdleIndex] = g_AcceptSocket;
-        g_ClentAddrArray[t_SocketIdleIndex] = t_ClientAddr;
+        g_struServerControl[t_SocketIdleIndex].m_ClientSocketFd = g_AcceptSocket;
+        g_struServerControl[t_SocketIdleIndex].m_ClientAddr = t_ClientAddr;
         // Create send thread
-        g_ptSendThread[t_SocketIdleIndex] = new std::thread(sendThread, t_SocketIdleIndex);
-        g_ptSendThread[t_SocketIdleIndex]->detach();
-        g_bSendThreadIdleFlag[t_SocketIdleIndex] = false;
+        g_struServerControl[t_SocketIdleIndex].m_ptSendThread = new std::thread(sendThread, t_SocketIdleIndex);
+        g_struServerControl[t_SocketIdleIndex].m_ptSendThread->detach();
+        g_struServerControl[t_SocketIdleIndex].m_bSendThreadIdleFlag = false;
         // Create receive thread
-        g_ptRecvThread[t_SocketIdleIndex] = new std::thread(recvThread, t_SocketIdleIndex);
-        g_ptRecvThread[t_SocketIdleIndex]->detach();
-        g_bRecvThreadIdleFlag[t_SocketIdleIndex] = false;
+        g_struServerControl[t_SocketIdleIndex].m_ptRecvThread = new std::thread(recvThread, t_SocketIdleIndex);
+        g_struServerControl[t_SocketIdleIndex].m_ptRecvThread->detach();
+        g_struServerControl[t_SocketIdleIndex].m_bRecvThreadIdleFlag = false;
         g_mutex.unlock();
     }
     bool allSocketClosedFlag = false;

@@ -4,14 +4,19 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <fstream>
-// #include <time.h>
 #include <ctime>
 #include <string>
 
 
 
 
-
+/* std::string datetimeToString(time_t time)
+ * Function: Convert datetime to string
+ * @param: time_t time               time stamp that need to convert to string
+ * 
+ * return:
+ *        std::string                the time string that converted from time_t
+ */
 std::string datetimeToString(time_t time)
 {
     int misc = time % 10000;
@@ -75,7 +80,7 @@ long int GetFileSize(std::string filename)
  */
 int sendFile(int socketfd, std::string filename, int mode)
 {
-   // char t_cBuffer[1024];
+   char t_cBuffer[1024];
    // int t_iBufferSize = sizeof(t_cBuffer);
    int t_iReadByteNum = 0;
    int t_iCurrentPacketIndex = 0;
@@ -94,13 +99,19 @@ int sendFile(int socketfd, std::string filename, int mode)
    // std::string t_sInfo = "The size of " + filename + "is " + std::to_string(t_ilFileSize);
    // strcpy(t_cBuffer, t_sInfo.c_str());
    // send(socketfd, t_cBuffer, t_sInfo.size(), 0);
+   // return 0;
    std::fstream t_fsReadFileStream;
    t_fsReadFileStream.open(filename, std::ios::in|std::ios::binary);
    if(!t_fsReadFileStream.is_open())
    {
-       std::cout << "Open file " << filename << "Failed." << std::endl;
+       std::cout << "Open file " << filename << " Failed." << std::endl;
        return -1;
    }
+   else
+   {
+       std::cout << "Open file " << filename << " Success." << std::endl;
+   }
+   std::cout << "t_iTotalPacketNum = " << t_iTotalPacketNum << std::endl;
    while(t_ilFileSizeRemain > 0)
    {
        if(t_ilFileSizeRemain >= MAX_SOCKET_PACKAGE_LEN)
@@ -125,10 +136,14 @@ int sendFile(int socketfd, std::string filename, int mode)
            t_struMsgReportData.m_iLastPacketFlag = 0;
        t_struMsgReportData.m_iValidByteNum = t_iReadByteNum;
        t_struMsgReportData.m_iSectionByteNum = sizeof(struct STRU_MSG_REPORT_DATA) - MAX_SOCKET_PACKAGE_LEN + t_iReadByteNum;
-       send(socketfd, &t_struMsgReportData, t_struMsgReportData.m_iSectionByteNum, 0);
+       // send(socketfd, &t_struMsgReportData, t_struMsgReportData.m_iSectionByteNum, 0);
+       send(socketfd, &t_struMsgReportData, sizeof(t_struMsgReportData), 0);
        t_ilFileSizeRemain -= t_iReadByteNum;
+       std::cout << "Send t_iReadByteNum = " << t_iReadByteNum << "Bytes." << std::endl;
+       std::cout << "t_ilFileSizeRemain = " << t_ilFileSizeRemain << std::endl;
    }
    t_fsReadFileStream.close();
+   std::cout << "sendFile: send " << filename << " Done." << std::endl;
    return 0;
 }
 
@@ -140,17 +155,75 @@ int sendFile(int socketfd, std::string filename, int mode)
  *        -1                        error occurs
  *         0                        success
  */
-int recvFile(int socketfd, int* t_pReadOffset, int* t_pWriteOffset)
+//int recvFile(int socketfd, int* t_pReadOffset, int* t_pWriteOffset)
+int recvFile(struct STRU_SERVER_CONTROL* t_pStruServerControl)
 {
-    UCHAR t_ucRecvBuffer[SOCKET_RECV_UNIT_MAX_LEN * 2];
-    bool t_bNewFileFlag = false;
-    bool t_bRecvFinishFlag = false;
-    time_t t_CurrentTime;
-    time(&t_CurrentTime);
-    std::string t_sCurrentTime = datetimeToString(t_CurrentTime);
-    while(!t_bRecvFinishFlag)
+   
+    return 0;
+}
+
+int processData(struct STRU_RECV_MANAGER& t_struRecvManager)
+{
+    UCHAR* t_ucBuffer = nullptr;
+    if(t_struRecvManager.m_iRecvStatus == 0)
     {
-        
+        std::cout << "processData: This is a new receive manager." << std::endl;
+        t_struRecvManager.m_iRecvStatus = 1;
     }
+    struct STRU_MSG_REPORT_DATA* t_pStruMsgReportData;
+    if(t_struRecvManager.m_iReadOffset + sizeof(struct STRU_MSG_REPORT_DATA) <= SOCKET_RECV_UNIT_MAX_LEN * 2)
+    {
+        t_pStruMsgReportData = (struct STRU_MSG_REPORT_DATA*)(t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset);
+        t_struRecvManager.m_iReadOffset += sizeof(struct STRU_MSG_REPORT_DATA);
+    }
+    else
+    {
+        t_ucBuffer = new UCHAR[sizeof(struct STRU_MSG_REPORT_DATA)];
+        // copy the first part
+        int t_iFirstSize = SOCKET_RECV_UNIT_MAX_LEN * 2 - t_struRecvManager.m_iReadOffset;
+        memcpy(t_ucBuffer, t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset, t_iFirstSize);
+        // copy the second part
+        int t_iSecondSize = sizeof(struct STRU_MSG_REPORT_DATA) - t_iFirstSize;
+        memcpy(t_ucBuffer + t_iFirstSize, t_struRecvManager.m_ucReceiveBufferAddr, t_iSecondSize);
+        t_pStruMsgReportData = (struct STRU_MSG_REPORT_DATA*)t_ucBuffer;
+        t_struRecvManager.m_iReadOffset = t_iSecondSize;
+    }
+    
+    // New File
+    if(t_pStruMsgReportData->m_iNewFileFlag == 1)
+    {
+        std::cout << "New file comes." << std::endl;
+        time_t t_CurrentTime;
+        time(&t_CurrentTime);
+        t_struRecvManager.m_sFileName = "recv_" + std::to_string(t_struRecvManager.m_iUserID) + "_" + datetimeToString(t_CurrentTime) + ".txt";
+        t_struRecvManager.m_WriteFileStream.open(t_struRecvManager.m_sFileName, std::ios::out|std::ios::binary);
+        if(!t_struRecvManager.m_WriteFileStream.is_open())
+        {
+            std::cout << "Open " + t_struRecvManager.m_sFileName + "Failed." << std::endl;
+            return -1;
+        }
+        // write binary to disk
+        t_struRecvManager.m_WriteFileStream.write(t_pStruMsgReportData->m_cData, t_pStruMsgReportData->m_iValidByteNum);
+    }
+    else if(t_struRecvManager.m_WriteFileStream.is_open())
+    {
+        std::cout << "Write to opened file." << std::endl;
+        // write binary to disk
+        t_struRecvManager.m_WriteFileStream.write(t_pStruMsgReportData->m_cData, t_pStruMsgReportData->m_iValidByteNum);
+    }
+    else
+    {
+        return -1;
+    }
+
+    // After write all received bytes to disk, check if it is the last packet, and close fstream
+    if(t_pStruMsgReportData->m_iLastPacketFlag == 1 && t_struRecvManager.m_WriteFileStream.is_open())
+    {
+        t_struRecvManager.m_WriteFileStream.close();
+    }
+
+    if(t_ucBuffer != nullptr)
+        delete []t_ucBuffer;
+    t_struRecvManager.m_iReadOffset %= (SOCKET_RECV_UNIT_MAX_LEN * 2);
     return 0;
 }
