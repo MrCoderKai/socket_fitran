@@ -13,10 +13,10 @@
 #include <string>
 // extern  constexpr int MAX_SOCKET_PACKAGE_LEN;
 
-constexpr int SOCKET_RECV_UNIT_MAX_LEN = 1024 * 1024 * 20; // 20M
+constexpr int SOCKET_RECV_UNIT_MAX_LEN = 1024 * 1 * 20; // 20M
 constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
-constexpr int SERVER_PORT = 24648;
-constexpr int MAX_CLIENT_NUM = 3;
+constexpr int SERVER_PORT = 24650;
+constexpr int MAX_CLIENT_NUM = 20;
 extern const std::string SERVER_IP_ADDRESS;// = "127.0.0.1";
 
 #ifndef __UCHAR__
@@ -76,7 +76,8 @@ struct STRU_MSG_REPORT_DATA
 struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID
 {
     struct STRU_PRIMITIVE_HEAD m_struHeader;
-    int m_iId;
+    int m_tRNTI; // This id is used in access stage.
+    int m_iId;   // This id is assigned by server. After access, it is used as the id of client in communication.
 };
 
 struct STRU_SERVER_CONTROL
@@ -84,6 +85,8 @@ struct STRU_SERVER_CONTROL
     int m_ClientSocketFd;
     // bool m_ClientSocketAliveStatus;
     struct sockaddr_in m_ClientAddr;
+    int m_tRNTI;
+    int m_iClientId;
     bool m_bSendThreadIdleFlag;
     std::thread* m_ptSendThread;
     bool m_bRecvThreadIdleFlag;
@@ -98,6 +101,8 @@ struct STRU_SERVER_CONTROL
         m_ClientSocketFd = -1;
         // m_ClientSocketAliveStatus = false;
         memset(&m_ClientAddr, 0, sizeof(m_ClientAddr));
+        m_tRNTI = -1;
+        m_iClientId = -1;
         m_bSendThreadIdleFlag = true;
         m_ptSendThread = nullptr;
         m_bRecvThreadIdleFlag = true;
@@ -107,6 +112,20 @@ struct STRU_SERVER_CONTROL
         memset(&m_ucReceiveBuffer, 0, sizeof(m_ucReceiveBuffer));
     }
 } ;
+
+
+struct STRU_REQ_DATA
+{
+    struct STRU_PRIMITIVE_HEAD m_struHeader;
+    int m_iFileNameLen;
+    char m_ucFileName[1024];
+    STRU_REQ_DATA()
+    {
+        m_iFileNameLen = 0;
+        memset(&m_ucFileName, 0, sizeof(m_ucFileName));
+    }
+} ;
+
 
 struct STRU_RECV_MANAGER
 {
@@ -138,4 +157,8 @@ struct STRU_RECV_MANAGER
 int sendFile(int socketfd, std::string filename, int mode);
 int recvFile(int socketfd);
 int processData(struct STRU_RECV_MANAGER& t_struRecvManager);
+void sendServerClientCloseSignal(int socketfd);
+void sendClientServerCloseSignal(int socketfd);
+void sendReqDataSignal(int socketfd, int mode, std::string filename);
+std::string getReqFilename(struct STRU_RECV_MANAGER& t_strRecvManager);
 #endif

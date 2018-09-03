@@ -58,6 +58,7 @@ bool g_acceptThreadExitFlag = false;
 
 void initial()
 {
+    srand((unsigned)time(NULL));
     memset(&g_ClientSocketAliveStatus, 0, sizeof(g_ClientSocketAliveStatus));
     for(int i=0; i < MAX_CLIENT_NUM; ++i)
     {
@@ -150,31 +151,37 @@ bool isStop()
     std::cout << "isStop Thread Exit." << std::endl;
 }
 
-void sendThread(int index)
-{
-    usleep(20000);
-    srand((unsigned)time(NULL));
-    std::cout << "Hello, This is send thread, index = " << index << std::endl;
-    char t_cBuffer[200]; // = {"Hello. this is server."};
-    int t_ClientId = rand();
-    //std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(t_ClientId);
-    //strcpy(t_cBuffer, buf.c_str());
-    //send(g_struServerControl[index].m_ClientSocketFd, t_cBuffer, buf.size(), 0);
 
-    // Send Client ID
+void assignId(int index)
+{
+    int t_ClientId = rand();
     struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID t_struAssignId;
     t_struAssignId.m_struHeader.m_ucMsgType = SERVER_CLIENT_ASSIGN_ID;
     t_struAssignId.m_iId = t_ClientId;
-    std::cout << "SendThread: client id = " << t_ClientId << std::endl;
+    t_struAssignId.m_tRNTI = g_struServerControl[index].m_tRNTI;
+    t_struAssignId.m_iId = t_ClientId;std::cout << "assignId: client m_tRNTI = " << g_struServerControl[index].m_tRNTI << ". assignId client id = " << t_ClientId << std::endl;
     send(g_struServerControl[index].m_ClientSocketFd, &t_struAssignId, sizeof(t_struAssignId), 0);
+}
+
+
+void sendThread(int index)
+{
+    usleep(20000);
+    std::cout << "Hello, This is send thread, index = " << index << std::endl;
+    // char t_cBuffer[200]; // = {"Hello. this is server."};
+    // int t_ClientId = rand();
+    // std::string buf = "Hello, This information comes from server. Your Id is " + std::to_string(t_ClientId);
+    // strcpy(t_cBuffer, buf.c_str());
+    // send(g_struServerControl[index].m_ClientSocketFd, t_cBuffer, buf.size(), 0);
 
     // Begin to send file
-    sendFile(g_struServerControl[index].m_ClientSocketFd, "screen_shoot_20180902231104.png", 0);
+    // sendFile(g_struServerControl[index].m_ClientSocketFd, "screen_shoot_20180902231104.png", 0);
     
     // Send close signal
-    struct STRU_CLOSE_SIGNAL t_struCloseSignal;
-    t_struCloseSignal.m_struHeader.m_ucMsgType = SERVER_CLIENT_CLOSE_SIGNAL;
-    send(g_struServerControl[index].m_ClientSocketFd, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
+    // struct STRU_CLOSE_SIGNAL t_struCloseSignal;
+    // t_struCloseSignal.m_struHeader.m_ucMsgType = SERVER_CLIENT_CLOSE_SIGNAL;
+    // send(g_struServerControl[index].m_ClientSocketFd, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
+    
     usleep(200000);
     g_mutex.lock();
     g_struServerControl[index].m_bSendThreadIdleFlag = true;
@@ -182,6 +189,33 @@ void sendThread(int index)
     g_mutex.unlock();
 }
 
+
+int getRNTI(struct STRU_RECV_MANAGER& t_struRecvManager)
+{
+    int t_RNTI = -1;
+    if(t_struRecvManager.m_iReadOffset + sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID) <= SOCKET_RECV_UNIT_MAX_LEN * 2)
+    {
+        struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID* t_pStruAssignId = (struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID*)(t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset);
+        t_struRecvManager.m_iReadOffset += sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID);
+        t_RNTI = t_pStruAssignId->m_tRNTI;
+    }
+    else
+    {
+        UCHAR* t_buffer = new UCHAR[sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID)];
+        // copy the first part
+        int t_iFirstSize = SOCKET_RECV_UNIT_MAX_LEN * 2 - t_struRecvManager.m_iReadOffset;
+        memcpy(t_buffer, t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset, t_iFirstSize);
+        // copy the second part
+        int t_iSecondSize = sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID) - t_iFirstSize;
+        memcpy(t_buffer + t_iFirstSize, t_struRecvManager.m_ucReceiveBufferAddr, t_iSecondSize);
+        struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID* t_pStruAssignId = (struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID*)t_buffer;
+        t_RNTI = t_pStruAssignId->m_tRNTI;
+        delete []t_buffer;
+        t_struRecvManager.m_iReadOffset = t_iSecondSize;
+    }
+    t_struRecvManager.m_iReadOffset %= (SOCKET_RECV_UNIT_MAX_LEN * 2);
+    return t_RNTI;
+}
 
 void recvThread(int index)
 {
@@ -191,6 +225,79 @@ void recvThread(int index)
     g_struServerControl[index].m_iWriteOffset = 0;
     memset(&g_struServerControl[index].m_ucReceiveBuffer, 0, sizeof(g_struServerControl[index].m_ucReceiveBuffer));
     
+    struct STRU_RECV_MANAGER t_struRecvManager(g_struServerControl[index].m_iReadOffset, g_struServerControl[index].m_iWriteOffset); // Remeber to initialize reference variables in struct
+    t_struRecvManager.m_ucReceiveBufferAddr = g_struServerControl[index].m_ucReceiveBuffer;
+
+    int cnt = 0;
+    bool t_bClientCloseFlag = false;
+    while(1)
+    {
+        int t_iEmptySize = 0;
+        if(t_struRecvManager.m_iWriteOffset >= t_struRecvManager.m_iReadOffset)
+            t_iEmptySize = SOCKET_RECV_UNIT_MAX_LEN * 2 - (t_struRecvManager.m_iWriteOffset - t_struRecvManager.m_iReadOffset);
+        else
+            t_iEmptySize = t_struRecvManager.m_iReadOffset - t_struRecvManager.m_iWriteOffset;
+        cnt = (int)recv(g_struServerControl[index].m_ClientSocketFd, t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iWriteOffset, t_iEmptySize, 0);
+        std::cout << "Client Index = " << index << ". After receive. Receive Bytes cnt = " << cnt << std::endl;
+        if(cnt == -1)
+        {
+            std::cout << "recvThread: Receivd Failed." << std::endl;
+            break;
+        }
+        t_struRecvManager.m_iWriteOffset += cnt;
+        if(t_struRecvManager.m_iWriteOffset >= SOCKET_RECV_UNIT_MAX_LEN * 2)
+            t_struRecvManager.m_iWriteOffset = 0;
+        bool t_bIsLoopFlag = true;
+        {
+            UCHAR t_ucPrimitiveType = *(UCHAR*)(t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset);
+            struct STRU_MSG_REPORT_DATA* t_pStruMsgReportData;
+            int t_iValidSize = 0;
+            if(t_struRecvManager.m_iWriteOffset >= t_struRecvManager.m_iReadOffset)
+                t_iValidSize = t_struRecvManager.m_iWriteOffset - t_struRecvManager.m_iReadOffset;
+            else
+                t_iValidSize = SOCKET_RECV_UNIT_MAX_LEN * 2 - (t_struRecvManager.m_iReadOffset - t_struRecvManager.m_iWriteOffset);
+            switch(t_ucPrimitiveType)
+            {
+                case CLIENT_SERVER_ACCESS_REQ:
+                    std::cout << "t_ucPrimitiveType = CLIENT_SERVER_ACCESS_REQ" << std::endl;
+                    if(t_iValidSize >= sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID))
+                    {
+                        g_struServerControl[index].m_tRNTI = getRNTI(t_struRecvManager);
+                        assignId(index);
+                    }
+                    else
+                    {
+                        t_bIsLoopFlag = false;
+                    }
+                    break;
+                case CLIENT_SERVER_REQ_DATA:
+                    std::cout << "t_ucPrimitiveType = CLIENT_SERVER_REQ_DATA" << std::endl;
+                    if(t_iValidSize >= sizeof(struct STRU_REQ_DATA))
+                    {
+                        std::string t_sFileName = getReqFilename(t_struRecvManager);
+                        // Begin to send file
+                        // sendFile(g_struServerControl[index].m_ClientSocketFd, "screen_shoot_20180902231104.png", 0);
+                        sendFile(g_struServerControl[index].m_ClientSocketFd, t_sFileName, 0);
+                        std::cout << "Client Request Filename = " << t_sFileName << std::endl;
+                    }
+                    else
+                    {
+                        t_bIsLoopFlag = false;
+                    }
+                case CLIENT_SERVER_CLOSE_SIGNAL:
+                    std::cout << "t_ucPrimitiveType = CLIENT_SERVER_CLOSE_SIGNAL" << std::endl;
+                    sendServerClientCloseSignal(g_struServerControl[index].m_ClientSocketFd);
+                    t_bClientCloseFlag = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+        if(t_bClientCloseFlag)
+            break;
+    }
+
+
     usleep(200000);
     g_mutex.lock();
     g_struServerControl[index].m_bRecvThreadIdleFlag = true;
@@ -240,6 +347,11 @@ void acceptThread()
         memset(&t_ClientAddr, 0, sizeof(struct sockaddr_in));
         std::cout << "acceptThread: Ready to accept a connect request." << std::endl;
         g_AcceptSocket = accept(g_Socket, (struct sockaddr *)&t_ClientAddr, &t_ClientLen);
+        if(g_ExitFlag) // This code is very important. Otherwise, the while loop will excute forever, because no client send CLIENT_SERVER_CLOSE_SIGNAL.
+        {
+            close(g_AcceptSocket);
+            break;
+        }
         if(g_AcceptSocket < 0)
         {
             std::cout << "acceptThread: Accept Failed" << std::endl;

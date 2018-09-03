@@ -21,19 +21,58 @@ const std::string SERVER_IP_ADDRESS = "127.0.0.1";
 //std::string SERVER_IP_ADDRESS = "127.0.0.1";
 int g_Socket;
 int g_AcceptSocket;
+int g_iClientId = -1;
+int g_tRNTI = -1;
+int g_iAccessFailedNum = 0;
+bool g_bAccessFlag = false;
+// std::string g_sReqFileName = "data.txt";
+// std::string g_sReqFileName = "screen_shoot_20180902231104.png";
+std::string g_sReqFileName = "paper.pdf";
+
 struct sockaddr_in g_ServerSockAddr;
-int g_iClientId = 0;
 UCHAR g_ucReceiveBuffer[SOCKET_RECV_UNIT_MAX_LEN * 2];
 int g_iWriteOffset = 0;
 int g_iReadOffset = 0;
 void initial()
 {
+    srand((unsigned)time(NULL));
 }
+
+
+void accessOnce()
+{
+    if(g_tRNTI == -1)
+        g_tRNTI = rand();
+    std::cout << "accessOnce: my m_tRNTI = " << g_tRNTI << std::endl;
+    std::cout << "accessOnce: my g_iClientId = " << g_iClientId << std::endl;
+    struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID t_struMsgAssignId;
+    t_struMsgAssignId.m_struHeader.m_ucMsgType = CLIENT_SERVER_ACCESS_REQ;
+    t_struMsgAssignId.m_tRNTI = g_tRNTI;
+    send(g_Socket, &t_struMsgAssignId, sizeof(t_struMsgAssignId), 0);
+    std::cout << "accessOnce: access once finished." << std::endl;
+}
+
+
 
 void sendThread()
 {
     usleep(20000);
     std::cout << "Hello, This is send thread" << std::endl;
+    while(!g_bAccessFlag)
+    {
+        accessOnce();
+        sleep(2);
+    }
+
+    // Send Request Data
+    sendReqDataSignal(g_Socket, 1, g_sReqFileName);
+
+    // Send close signal
+    sendClientServerCloseSignal(g_Socket);
+    // struct STRU_CLOSE_SIGNAL t_struCloseSignal;
+    // t_struCloseSignal.m_struHeader.m_ucMsgType = CLIENT_SERVER_CLOSE_SIGNAL;
+    // send(g_Socket, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
+
     usleep(2000000);
     g_mutex.lock();
     std::cout << "Send Thread Exits." << std::endl;
@@ -43,12 +82,22 @@ void sendThread()
 
 int getId()
 {
-    int id = 0;
+    int id = -1;
     if(g_iReadOffset + sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID) <= SOCKET_RECV_UNIT_MAX_LEN * 2)
     {
         struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID* t_pStruAssignId = (struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID*)(g_ucReceiveBuffer + g_iReadOffset);
         g_iReadOffset += sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID);
-        id = t_pStruAssignId->m_iId;
+        std::cout << "getId: received m_tRNTI = " << t_pStruAssignId->m_tRNTI << std::endl;
+        if(t_pStruAssignId->m_tRNTI != g_tRNTI)
+        {
+            g_iAccessFailedNum += 1;
+        }
+        else
+        {
+            id = t_pStruAssignId->m_iId;
+            g_iAccessFailedNum = 0;
+            g_bAccessFlag = true;
+        }
     }
     else
     {
@@ -60,9 +109,19 @@ int getId()
         int t_iSecondSize = sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID) - t_iFirstSize;
         memcpy(t_buffer + t_iFirstSize, g_ucReceiveBuffer, t_iSecondSize);
         struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID* t_pStruAssignId = (struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID*)t_buffer;
-        id = t_pStruAssignId->m_iId;
-        delete []t_buffer;
         g_iReadOffset = t_iSecondSize;
+        std::cout << "getId: received m_tRNTI = " << t_pStruAssignId->m_tRNTI << std::endl;
+        if(t_pStruAssignId->m_tRNTI != g_tRNTI)
+        {
+            g_iAccessFailedNum += 1;
+        }
+        else
+        {
+            id = t_pStruAssignId->m_iId;
+            g_iAccessFailedNum = 0;
+            g_bAccessFlag = true;
+        }
+        delete []t_buffer;
     }
     g_iReadOffset %= (SOCKET_RECV_UNIT_MAX_LEN * 2); 
     return id;
@@ -80,31 +139,70 @@ void recvThread()
     t_struRecvManager.m_ucReceiveBufferAddr = g_ucReceiveBuffer;
 
     std::cout << "Begin to receive ..." << std::endl;
-    int cnt = 0;
+    int t_iCntPart1 = 0;
+    int t_iCntPart2 = 0;
     while(1)
     {
-        int t_iEmptySize = 0;
+        int t_iEmptySizePart1 = 0;
+        int t_iEmptySizePart2 = 0;
+        t_iCntPart1 = 0;
+        t_iCntPart2 = 0;
         if(g_iWriteOffset >= g_iReadOffset)
-            t_iEmptySize = SOCKET_RECV_UNIT_MAX_LEN * 2 - (g_iWriteOffset - g_iReadOffset);
+        {
+            // t_iEmptySize = SOCKET_RECV_UNIT_MAX_LEN * 2 - (g_iWriteOffset - g_iReadOffset);
+            t_iEmptySizePart1 = SOCKET_RECV_UNIT_MAX_LEN * 2 - g_iWriteOffset;
+            t_iEmptySizePart2 = (int)(g_iReadOffset * 0.8);
+        }
         else if(g_iWriteOffset < g_iReadOffset)
-            t_iEmptySize = g_iReadOffset - g_iWriteOffset;
-        cnt = (int)recv(g_Socket, g_ucReceiveBuffer + g_iWriteOffset, t_iEmptySize, 0);
-        std::cout << "After receive. Receive Bytes cnt = " << cnt << std::endl;
-        if(cnt == -1)
+        {
+            // t_iEmptySize = g_iReadOffset - g_iWriteOffset;
+            t_iEmptySizePart1 = (int)((g_iReadOffset - g_iWriteOffset) * 0.8);
+            t_iEmptySizePart2 = 0;
+        }
+        std::cout << "*t_iEmptySizePart1 = " << t_iEmptySizePart1 << std::endl;
+        std::cout << "*t_iEmptySizePart2 = " << t_iEmptySizePart2 << std::endl;
+        // t_iCntPart1 = (int)recv(g_Socket, g_ucReceiveBuffer + g_iWriteOffset, t_iEmptySize, 0);
+        t_iCntPart1 = (int)recv(g_Socket, g_ucReceiveBuffer + g_iWriteOffset, t_iEmptySizePart1, 0);
+        std::cout << "*After receive. Receive Bytes t_iCntPart1 = " << t_iCntPart1 << std::endl;
+        if(t_iCntPart1 == -1)
         {
             std::cout << "recvThread: Receivd Failed." << std::endl;
             break;
         }
-        g_iWriteOffset += cnt;
-        if(g_iWriteOffset >= SOCKET_RECV_UNIT_MAX_LEN * 2)
-            g_iWriteOffset = 0;
+        // the ratio 0.3 here is to avoid g_iWriteOffset == g_iReadOffset, otherwise, it will be hard to handle in the following, because I can know whether the whole buffer is empty or full with data.
+        if(t_iEmptySizePart2 >= (int)(SOCKET_RECV_UNIT_MAX_LEN * 2 * 0.3) && t_iCntPart1 == t_iEmptySizePart1) // receive if and only if there are data to receive and there is enough free memeory.
+        // if(t_iEmptySizePart2 != 0)
+        {
+            t_iCntPart2 = (int)recv(g_Socket, g_ucReceiveBuffer, t_iEmptySizePart2, 0);
+            if(t_iCntPart2 == -1)
+            {
+                std::cout << "recvThread: Receivd Failed 2." << std::endl;
+                break;
+            }
+            std::cout << "*After receive. Receive Bytes t_iCntPart2 = " << t_iCntPart2 << std::endl;
+        }
+        else
+        {
+            t_iCntPart2 = 0;
+        }
+        g_iWriteOffset = (g_iWriteOffset + t_iCntPart1 + t_iCntPart2) % (SOCKET_RECV_UNIT_MAX_LEN * 2);
+        // if(g_iWriteOffset >= SOCKET_RECV_UNIT_MAX_LEN * 2)
+        //     g_iWriteOffset = 0;
+        std::cout << "*g_iWriteOffset = " << g_iWriteOffset << std::endl;
+        std::cout << "*g_iReadOffset = " << g_iReadOffset << std::endl;
+        std::cout << "*receive buffer size = " << SOCKET_RECV_UNIT_MAX_LEN * 2 << std::endl;
+        int t_iValidSize = 0;
+        if(g_iWriteOffset >= g_iReadOffset)
+            t_iValidSize = g_iWriteOffset - g_iReadOffset;
+        else
+            t_iValidSize = SOCKET_RECV_UNIT_MAX_LEN * 2 - (g_iReadOffset - g_iWriteOffset);
         bool t_bIsLoopFlag = true;
-        // while(t_bIsLoopFlag)
+        // while(g_iWriteOffset >= g_iReadOffset && t_bIsLoopFlag)
+        while(t_iValidSize > 0 && t_bIsLoopFlag)
         {
             // Get Msg Primitive
             UCHAR t_ucPrimitiveType = *(UCHAR*)(g_ucReceiveBuffer + g_iReadOffset);
             struct STRU_MSG_REPORT_DATA* t_pStruMsgReportData;
-            int t_iValidSize = 0;
             if(g_iWriteOffset >= g_iReadOffset)
                 t_iValidSize = g_iWriteOffset - g_iReadOffset;
             else
@@ -113,6 +211,8 @@ void recvThread()
             std::cout << "g_iWriteOffset = " << g_iWriteOffset << std::endl;
             std::cout << "g_iReadOffset = " << g_iReadOffset << std::endl;
             std::cout << "t_iValidSize = " << t_iValidSize << std::endl;
+            if(t_iValidSize == 0)
+                break;
             switch(t_ucPrimitiveType)
             {
                 case SERVER_CLIENT_ASSIGN_ID:
@@ -120,15 +220,16 @@ void recvThread()
                     if(t_iValidSize >= sizeof(struct STRU_MSG_SERVER_CLIENT_ASSIGN_ID))
                     {
                         g_iClientId = getId();
-                        t_bIsLoopFlag = false;
-                        t_struRecvManager.m_iUserID = g_iClientId;
-                        std::cout << "Assigned ID = " << g_iClientId << std::endl;
+                        if(g_iClientId != -1)
+                        {
+                            t_struRecvManager.m_iUserID = g_iClientId;
+                            std::cout << "Assigned ID = " << g_iClientId << std::endl;
+                        }
                     }
                     else
                     {
                         t_bIsLoopFlag = false;
                     }
-                    std::cout << "OK" << std::endl;
                     break;
                 case SERVER_CLIENT_REQ_DATA:
                     std::cout << "t_ucPrimitiveType = SERVER_CLIENT_REQ_DATA" << std::endl;
@@ -139,13 +240,27 @@ void recvThread()
                     {
                         processData(t_struRecvManager);
                     }
+                    else
+                    {
+                        std::cout << "Not enough data. Continue to receive." << std::endl;
+                        t_bIsLoopFlag = false;
+                    }
                     break;
                 case SERVER_CLIENT_CLOSE_SIGNAL:
                     std::cout << "t_ucPrimitiveType = SERVER_CLIENT_CLOSE_SIGNAL" << std::endl;
-                    t_bServerCloseFlag = true;
+                    if(t_iValidSize >= sizeof(struct STRU_CLOSE_SIGNAL))
+                    {
+                        t_bServerCloseFlag = true;
+                        g_iReadOffset = (g_iReadOffset + sizeof(struct STRU_CLOSE_SIGNAL)) % (SOCKET_RECV_UNIT_MAX_LEN * 2);
+                    }
+                    else
+                    {
+                        t_bIsLoopFlag = false;
+                    }
                     break;
                 default:
                     std::cout << "t_ucPrimitiveType = default" << std::endl;
+                    t_bIsLoopFlag = false;
                     break;
             }
             // ATTENTION !!!!!!!!!!!!!!!!!!!!!!!!

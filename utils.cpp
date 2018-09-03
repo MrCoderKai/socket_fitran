@@ -6,6 +6,7 @@
 #include <fstream>
 #include <ctime>
 #include <string>
+#include <sys/time.h>
 
 
 
@@ -35,13 +36,28 @@ std::string datetimeToString(time_t time)
     sprintf(hourStr, "%02d", hour);              // 时。
     sprintf(minuteStr, "%02d", minute);          // 分。
     sprintf(secondStr, "%02d", second);          // 秒。
-    sprintf(miscStr, "%04d", misc);              // misc
+    //sprintf(miscStr, "%04d", misc);              // misc
     char s[20];                                // 定义总日期时间char*变量。
-    sprintf(s, "%s%s%s%s%s%s_%s", yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr, miscStr);// 将年月日时分秒合并。
+    // sprintf(s, "%s%s%s%s%s%s_%s", yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr, miscStr);// 将年月日时分秒合并。
+    sprintf(s, "%s%s%s%s%s%s", yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr);// 将年月日时分秒合并。
     std::string str(s);                             // 定义string变量，并将总日期时间char*变量作为构造函数的参数传入。
     return str;                                // 返回转换日期时间后的string变量。
 }
 
+
+void sendServerClientCloseSignal(int socketfd)
+{
+    struct STRU_CLOSE_SIGNAL t_struCloseSignal;
+    t_struCloseSignal.m_struHeader.m_ucMsgType = SERVER_CLIENT_CLOSE_SIGNAL;
+    send(socketfd, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
+}
+
+void sendClientServerCloseSignal(int socketfd)
+{
+    struct STRU_CLOSE_SIGNAL t_struCloseSignal;
+    t_struCloseSignal.m_struHeader.m_ucMsgType = CLIENT_SERVER_CLOSE_SIGNAL;
+    send(socketfd, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
+}
 
 /* long int GetFileSize(std::string filename)
  * Function: Get file size specified by filename
@@ -147,6 +163,51 @@ int sendFile(int socketfd, std::string filename, int mode)
    return 0;
 }
 
+
+
+void sendReqDataSignal(int socketfd, int mode, std::string filename) // mode 0: server 1: client
+{
+    std::cout << "Send a reqest data signal" << std::endl;
+    struct STRU_REQ_DATA t_struReqData;
+    if(mode == 0)
+        t_struReqData.m_struHeader.m_ucMsgType = SERVER_CLIENT_REQ_DATA;
+    else
+        t_struReqData.m_struHeader.m_ucMsgType = CLIENT_SERVER_REQ_DATA;
+    t_struReqData.m_iFileNameLen = filename.size();
+    memset(t_struReqData.m_ucFileName, 0, sizeof(t_struReqData.m_ucFileName));
+    strcpy(t_struReqData.m_ucFileName, filename.c_str());
+    send(socketfd, &t_struReqData, sizeof(t_struReqData), 0);
+}
+
+std::string getReqFilename(struct STRU_RECV_MANAGER& t_struRecvManager)
+{
+    std::cout << "Get request filename." << std::endl;
+    std::string t_sFileName = "";
+    if(t_struRecvManager.m_iReadOffset + sizeof(struct STRU_REQ_DATA) <= SOCKET_RECV_UNIT_MAX_LEN * 2)
+    {
+        struct STRU_REQ_DATA* t_pStruReqData = (struct STRU_REQ_DATA*)(t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset);
+        int t_iFileNameLength = t_pStruReqData->m_iFileNameLen;
+        t_sFileName = std::string(t_pStruReqData->m_ucFileName);
+        t_struRecvManager.m_iReadOffset += sizeof(struct STRU_REQ_DATA);
+    }
+    else
+    {
+        UCHAR* t_buffer = new UCHAR[sizeof(struct STRU_REQ_DATA)];
+        // copy the first part
+        int t_iFirstSize = SOCKET_RECV_UNIT_MAX_LEN * 2 - t_struRecvManager.m_iReadOffset;
+        memcpy(t_buffer, t_struRecvManager.m_ucReceiveBufferAddr + t_struRecvManager.m_iReadOffset, t_iFirstSize);
+        // copy the second part
+        int t_iSecondSize = sizeof(struct STRU_REQ_DATA) - t_iFirstSize;
+        memcpy(t_buffer + t_iFirstSize, t_struRecvManager.m_ucReceiveBufferAddr, t_iSecondSize);
+        struct STRU_REQ_DATA* t_pStruReqData = (struct STRU_REQ_DATA*)t_buffer;
+        t_sFileName = std::string(t_pStruReqData->m_ucFileName);
+        t_struRecvManager.m_iReadOffset =t_iSecondSize;
+        delete []t_buffer;
+    }
+    t_struRecvManager.m_iReadOffset %= (SOCKET_RECV_UNIT_MAX_LEN * 2);
+    return t_sFileName;
+}
+
 /* int recvFile(int socketfd)
  * Function Receive a file from server or client
  * @param: int socketfd             socket file descriptor
@@ -195,7 +256,12 @@ int processData(struct STRU_RECV_MANAGER& t_struRecvManager)
         std::cout << "New file comes." << std::endl;
         time_t t_CurrentTime;
         time(&t_CurrentTime);
-        t_struRecvManager.m_sFileName = "recv_" + std::to_string(t_struRecvManager.m_iUserID) + "_" + datetimeToString(t_CurrentTime) + ".txt";
+        struct timeval t_TimeVal;
+        gettimeofday(&t_TimeVal, NULL);
+        int64_t t_iTimeStamp = t_TimeVal.tv_sec * 1000 + t_TimeVal.tv_usec / 1000;
+        std::cout << "processData: t_CurrentTime = " << t_CurrentTime << std::endl;
+        t_struRecvManager.m_sFileName = "recv_" + std::to_string(t_struRecvManager.m_iUserID) + "_" + datetimeToString(t_CurrentTime) + "_" + std::to_string(t_iTimeStamp % 10000) + ".txt";
+        std::cout << "processData: filename = " << t_struRecvManager.m_sFileName << std::endl;
         t_struRecvManager.m_WriteFileStream.open(t_struRecvManager.m_sFileName, std::ios::out|std::ios::binary);
         if(!t_struRecvManager.m_WriteFileStream.is_open())
         {

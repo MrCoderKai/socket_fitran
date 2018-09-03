@@ -31,7 +31,12 @@
 *.out
 *.app
 
+
+*.swp
+*.un~
 *.out
 *.log
 *.png
 *.gch
+*.pdf
+*.txt
