@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <thread>
 #include <mutex>
+#include <sys/time.h>
 #include "common.h"
 
 //constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
@@ -27,7 +28,7 @@ int g_iAccessFailedNum = 0;
 bool g_bAccessFlag = false;
 // std::string g_sReqFileName = "data.txt";
 // std::string g_sReqFileName = "screen_shoot_20180902231104.png";
-std::string g_sReqFileName = "paper.pdf";
+std::string g_sReqFileName = "paper";
 
 struct sockaddr_in g_ServerSockAddr;
 UCHAR g_ucReceiveBuffer[SOCKET_RECV_UNIT_MAX_LEN * 2];
@@ -65,10 +66,17 @@ void sendThread()
     }
 
     // Send Request Data
+    struct timeval t_TimeVal;
+    gettimeofday(&t_TimeVal, NULL);
+    int64_t t_iTimeStamp = t_TimeVal.tv_sec * 1000 + t_TimeVal.tv_usec / 1000;
+    std::cout << "t_iTimeStamp = " <<  t_iTimeStamp << std::endl;
+    g_sReqFileName += std::to_string(t_iTimeStamp % 15) + ".pdf";
+    g_sReqFileName = "TIM2.2.0.exe";
+    std::cout << "sendThread: request filename = " << g_sReqFileName << std::endl;
     sendReqDataSignal(g_Socket, 1, g_sReqFileName);
 
     // Send close signal
-    sendClientServerCloseSignal(g_Socket);
+    // sendClientServerCloseSignal(g_Socket);
     // struct STRU_CLOSE_SIGNAL t_struCloseSignal;
     // t_struCloseSignal.m_struHeader.m_ucMsgType = CLIENT_SERVER_CLOSE_SIGNAL;
     // send(g_Socket, &t_struCloseSignal, sizeof(t_struCloseSignal), 0);
@@ -167,6 +175,7 @@ void recvThread()
         if(t_iCntPart1 == -1)
         {
             std::cout << "recvThread: Receivd Failed." << std::endl;
+            sleep(30);
             break;
         }
         // the ratio 0.3 here is to avoid g_iWriteOffset == g_iReadOffset, otherwise, it will be hard to handle in the following, because I can know whether the whole buffer is empty or full with data.
@@ -177,6 +186,7 @@ void recvThread()
             if(t_iCntPart2 == -1)
             {
                 std::cout << "recvThread: Receivd Failed 2." << std::endl;
+                sleep(30);
                 break;
             }
             std::cout << "*After receive. Receive Bytes t_iCntPart2 = " << t_iCntPart2 << std::endl;
@@ -239,6 +249,11 @@ void recvThread()
                     if(t_iValidSize >= sizeof(struct STRU_MSG_REPORT_DATA))
                     {
                         processData(t_struRecvManager);
+                        if(t_struRecvManager.m_iRecvStatus == 2)
+                        {
+                            std::cout << "Send ClientServerCloseSignal" << std::endl;
+                            sendClientServerCloseSignal(g_Socket);
+                        }
                     }
                     else
                     {

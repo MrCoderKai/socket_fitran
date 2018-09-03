@@ -13,9 +13,9 @@
 #include <string>
 // extern  constexpr int MAX_SOCKET_PACKAGE_LEN;
 
-constexpr int SOCKET_RECV_UNIT_MAX_LEN = 1024 * 1 * 20; // 20M
+constexpr int SOCKET_RECV_UNIT_MAX_LEN = 1024 * 5; // 500K
 constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
-constexpr int SERVER_PORT = 24652;
+constexpr int SERVER_PORT = 24653;
 constexpr int MAX_CLIENT_NUM = 20;
 extern const std::string SERVER_IP_ADDRESS;// = "127.0.0.1";
 
@@ -56,6 +56,7 @@ struct STRU_MSG_REPORT_DATA
     int m_iId;
     int m_iNewFileFlag;
     int m_iPacketIdx;
+    int m_iTotalPacketNum;
     int m_iLastPacketFlag;
     int m_iValidByteNum;
     int m_iSectionByteNum;
@@ -66,6 +67,7 @@ struct STRU_MSG_REPORT_DATA
         m_iId = 0;
         m_iNewFileFlag = 0;
         m_iPacketIdx = 0;
+        m_iTotalPacketNum = 0;
         m_iLastPacketFlag = 0;
         m_iValidByteNum = 0;
         m_iSectionByteNum = 0;
@@ -130,7 +132,7 @@ struct STRU_REQ_DATA
 struct STRU_RECV_MANAGER
 {
     int m_iUserID;
-    int m_iRecvStatus; // 0: not receive 1:receiving
+    int m_iRecvStatus; // 0: not receive 1:receiving 2: receive finished
     int m_iPacketCurrentIndex;
     int m_iPacketReceiveSize;
     int m_iBufferOffset;

@@ -277,8 +277,9 @@ void recvThread(int index)
                         std::string t_sFileName = getReqFilename(t_struRecvManager);
                         // Begin to send file
                         // sendFile(g_struServerControl[index].m_ClientSocketFd, "screen_shoot_20180902231104.png", 0);
-                        sendFile(g_struServerControl[index].m_ClientSocketFd, t_sFileName, 0);
                         std::cout << "Client Request Filename = " << t_sFileName << std::endl;
+                        sendFile(g_struServerControl[index].m_ClientSocketFd, t_sFileName, 0);
+                        std::cout << "recvThread: send file done." << std::endl;
                     }
                     else
                     {
@@ -349,7 +350,8 @@ void acceptThread()
         g_AcceptSocket = accept(g_Socket, (struct sockaddr *)&t_ClientAddr, &t_ClientLen);
         if(g_ExitFlag) // This code is very important. Otherwise, the while loop will excute forever, because no client send CLIENT_SERVER_CLOSE_SIGNAL.
         {
-            close(g_AcceptSocket);
+            if(g_AcceptSocket >= 0)
+                close(g_AcceptSocket);
             break;
         }
         if(g_AcceptSocket < 0)

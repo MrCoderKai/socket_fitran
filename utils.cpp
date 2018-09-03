@@ -145,6 +145,9 @@ int sendFile(int socketfd, std::string filename, int mode)
        else
            t_struMsgReportData.m_struHeader.m_ucMsgType = CLIENT_SERVER_SEND_DATA;
        t_struMsgReportData.m_iPacketIdx = t_iCurrentPacketIndex;
+       t_struMsgReportData.m_iTotalPacketNum = t_iTotalPacketNum;
+       std::cout << "sendFile: t_iCurrentPacketIndex = " << t_iCurrentPacketIndex << std::endl;
+       std::cout << "sendFile: t_iTotalPacketNum = " << t_iTotalPacketNum << std::endl;
        ++t_iCurrentPacketIndex;
        if(t_iCurrentPacketIndex == t_iTotalPacketNum)
            t_struMsgReportData.m_iLastPacketFlag = 1;
@@ -155,7 +158,7 @@ int sendFile(int socketfd, std::string filename, int mode)
        // send(socketfd, &t_struMsgReportData, t_struMsgReportData.m_iSectionByteNum, 0);
        send(socketfd, &t_struMsgReportData, sizeof(t_struMsgReportData), 0);
        t_ilFileSizeRemain -= t_iReadByteNum;
-       std::cout << "Send t_iReadByteNum = " << t_iReadByteNum << "Bytes." << std::endl;
+       std::cout << "Send t_iReadByteNum = " << t_iReadByteNum << " Bytes." << std::endl;
        std::cout << "t_ilFileSizeRemain = " << t_ilFileSizeRemain << std::endl;
    }
    t_fsReadFileStream.close();
@@ -260,7 +263,7 @@ int processData(struct STRU_RECV_MANAGER& t_struRecvManager)
         gettimeofday(&t_TimeVal, NULL);
         int64_t t_iTimeStamp = t_TimeVal.tv_sec * 1000 + t_TimeVal.tv_usec / 1000;
         std::cout << "processData: t_CurrentTime = " << t_CurrentTime << std::endl;
-        t_struRecvManager.m_sFileName = "recv_" + std::to_string(t_struRecvManager.m_iUserID) + "_" + datetimeToString(t_CurrentTime) + "_" + std::to_string(t_iTimeStamp % 10000) + ".txt";
+        t_struRecvManager.m_sFileName = "recv_" + std::to_string(t_struRecvManager.m_iUserID) + "_" + datetimeToString(t_CurrentTime) + "_" + std::to_string(t_iTimeStamp % 10000) + ".pdf";
         std::cout << "processData: filename = " << t_struRecvManager.m_sFileName << std::endl;
         t_struRecvManager.m_WriteFileStream.open(t_struRecvManager.m_sFileName, std::ios::out|std::ios::binary);
         if(!t_struRecvManager.m_WriteFileStream.is_open())
@@ -286,7 +289,12 @@ int processData(struct STRU_RECV_MANAGER& t_struRecvManager)
     if(t_pStruMsgReportData->m_iLastPacketFlag == 1 && t_struRecvManager.m_WriteFileStream.is_open())
     {
         t_struRecvManager.m_WriteFileStream.close();
+        t_struRecvManager.m_iRecvStatus = 2;
     }
+
+    // print some information
+    std::cout << "processData: m_iPacketIdx = " << t_pStruMsgReportData->m_iPacketIdx << std::endl;
+    std::cout << "processData: m_iTotalPacketNum = " << t_pStruMsgReportData->m_iTotalPacketNum << std::endl;
 
     if(t_ucBuffer != nullptr)
         delete []t_ucBuffer;
