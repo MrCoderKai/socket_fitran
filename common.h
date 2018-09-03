@@ -15,7 +15,7 @@
 
 constexpr int SOCKET_RECV_UNIT_MAX_LEN = 1024 * 1 * 20; // 20M
 constexpr int MAX_SOCKET_PACKAGE_LEN = 1024;
-constexpr int SERVER_PORT = 24650;
+constexpr int SERVER_PORT = 24652;
 constexpr int MAX_CLIENT_NUM = 20;
 extern const std::string SERVER_IP_ADDRESS;// = "127.0.0.1";
 
